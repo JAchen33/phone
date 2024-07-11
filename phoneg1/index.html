@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>恐龍跳躍</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            border: 2px solid #000;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 10px;
+            max-width: 80%;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="startScreen">
+        <h1>恐龍跳躍</h1>
+        <p>點擊螢幕左側跳躍</p>
+        <p>連續點擊兩下可以滯留空中閃避一秒</p>
+        <p>點擊螢幕右側可以快速下降</p>
+        <button id="startButton" disabled>開始遊戲</button>
+    </div>
+    <div id="gameOverScreen" style="display: none;">
+        <h1>遊戲結束</h1>
+        <p>得分: <span id="finalScore"></span></p>
+        <p>最高分: <span id="highScore"></span></p>
+        <button id="restartButton">重新開始</button>
+        <button id="quitButton">退出</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const quitButton = document.getElementById('quitButton');
+
+        let dinosaur, obstacles, score, lives, consecutiveJumps, highScore;
+        let backgroundMusic, jumpSound, failSound;
+        let gameSpeed, obstacleInterval;
+        let backgroundX = 0;
+        let lastTime = 0;
+        let animationFrameId;
+        let canvasWidth, canvasHeight;
+
+        const INITIAL_GAME_SPEED = 2;
+        const INITIAL_OBSTACLE_INTERVAL = 3000;
+        const targetFPS = 60;
+        const timeStep = 1000 / 120;
+        let accumulator = 0;
+        const dinoImage = new Image();
+        const plantImage = new Image();
+        const backgroundImage = new Image();
+
+        function loadResources() {
+            return new Promise((resolve, reject) => {
+                let loadedCount = 0;
+                const totalResources = 6;
+
+                function onLoad() {
+                    loadedCount++;
+                    if (loadedCount === totalResources) {
+                        resolve();
+                    }
+                }
+
+                function onError(e) {
+                    console.error("資源加載失敗:", e);
+                    reject(e);
+                }
+
+                dinoImage.onload = onLoad;
+                dinoImage.onerror = onError;
+                dinoImage.src = 'dinosaur.png';
+
+                plantImage.onload = onLoad;
+                plantImage.onerror = onError;
+                plantImage.src = 'plant.png';
+
+                backgroundImage.onload = onLoad;
+                backgroundImage.onerror = onError;
+                backgroundImage.src = 'background.jpg';
+
+                backgroundMusic = new Audio('background_music.mp3');
+                backgroundMusic.oncanplaythrough = onLoad;
+                backgroundMusic.onerror = onError;
+
+                jumpSound = new Audio('jump_sound.wav');
+                jumpSound.oncanplaythrough = onLoad;
+                jumpSound.onerror = onError;
+
+                failSound = new Audio('fail_sound.wav');
+                failSound.oncanplaythrough = onLoad;
+                failSound.onerror = onError;
+            });
+        }
+
+        class Dinosaur {
+            constructor() {
+                this.width = canvasWidth * 0.1;
+                this.height = canvasHeight * 0.2;
+                this.x = canvasWidth * 0.1;
+                this.y = canvasHeight - this.height;
+                this.jumping = false;
+                this.velocity = 0;
+                this.gravity = 0.002 * canvasHeight;
+                this.jumpStrength = -1.0 * canvasHeight * 0.003;
+                this.maxFallSpeed = canvasHeight * 0.005;
+                this.hovering = false;
+                this.hoverTime = 0;
+                this.canDoubleJump = false;
+            }
+
+            draw() {
+                ctx.drawImage(dinoImage, this.x, this.y, this.width, this.height);
+            }
+
+            update(dt) {
+                if (this.jumping) {
+                    this.velocity += this.gravity * dt / 1000;
+                    this.velocity = Math.min(this.velocity, this.maxFallSpeed);
+                    this.y += this.velocity * dt / 1000;
+
+                    if (this.y > canvasHeight - this.height) {
+                        this.y = canvasHeight - this.height;
+                        this.jumping = false;
+                        this.velocity = 0;
+                        this.canDoubleJump = false;
+                    }
+                }
+
+                if (this.hovering) {
+                    this.hoverTime += dt;
+                    if (this.hoverTime >= 1000) {
+                        this.hovering = false;
+                        this.velocity = 0;
+                    }
+                }
+            }
+
+            jump() {
+                if (!this.jumping && !this.hovering) {
+                    this.jumping = true;
+                    this.velocity = this.jumpStrength;
+                    this.canDoubleJump = true;
+                    jumpSound.play().catch(e => console.error("音效播放失敗:", e));
+                } else if (this.canDoubleJump && !this.hovering) {
+                    this.velocity = this.jumpStrength * 0.9;
+                    this.canDoubleJump = false;
+                    jumpSound.play().catch(e => console.error("音效播放失敗:", e));
+                }
+            }
+
+            hover() {
+                if (this.jumping && !this.hovering) {
+                    this.hovering = true;
+                    this.hoverTime = 0;
+                    this.velocity = 0;
+                }
+            }
+
+            groundPound() {
+                if (this.jumping && !this.hovering) {
+                    this.velocity = this.maxFallSpeed;
+                }
+            }
+        }
+
+        class Obstacle {
+            constructor() {
+                this.width = canvasWidth * 0.08;
+                this.height = canvasHeight * 0.2;
+                this.x = canvasWidth;
+                this.y = canvasHeight - this.height;
+            }
+
+            draw() {
+                ctx.drawImage(plantImage, this.x, this.y, this.width, this.height);
+            }
+
+            update(dt) {
+                this.x -= gameSpeed * (dt / 1000) * canvasWidth * 0.1;
+            }
+        }
+
+        function initGame() {
+            dinosaur = new Dinosaur();
+            obstacles = [];
+            score = 0;
+            lives = 10;
+            consecutiveJumps = 0;
+            gameSpeed = INITIAL_GAME_SPEED;
+            obstacleInterval = INITIAL_OBSTACLE_INTERVAL;
+            highScore = Number(localStorage.getItem('highScore')) || 0;
+
+            backgroundMusic.loop = true;
+            backgroundMusic.play().catch(e => console.error("背景音樂播放失敗:", e));
+        }
+
+        function startGame() {
+            if (!dinoImage.complete || !plantImage.complete || !backgroundImage.complete) {
+                alert("圖片資源尚未加載完成,請稍後再試。");
+                return;
+            }
+            startScreen.style.display = 'none';
+            initGame();
+            animationFrameId = requestAnimationFrame(gameLoop);
+            createObstacle();
+        }
+
+        function createObstacle() {
+            if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < canvasWidth * 0.7) {
+                obstacles.push(new Obstacle());
+            }
+            let nextInterval = obstacleInterval - (score * 5);
+            nextInterval = Math.max(nextInterval, 1000);
+            setTimeout(createObstacle, nextInterval);
+        }
+
+        function drawBackground() {
+            const bgWidth = backgroundImage.width;
+            const bgHeight = backgroundImage.height;
+            const scale = Math.max(canvasWidth / bgWidth, canvasHeight / bgHeight);
+            const scaledWidth = bgWidth * scale;
+            const scaledHeight = bgHeight * scale;
+
+            ctx.drawImage(backgroundImage, Math.floor(backgroundX), 0, scaledWidth, scaledHeight);
+            ctx.drawImage(backgroundImage, Math.floor(backgroundX) + scaledWidth, 0, scaledWidth, scaledHeight);
+        }
+
+        function gameLoop(currentTime) {
+            if (lastTime === 0) {
+                lastTime = currentTime;
+            }
+
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+
+            accumulator += deltaTime;
+
+            while (accumulator >= timeStep) {
+                updateGame(timeStep);
+                accumulator -= timeStep;
+            }
+
+            drawGame();
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        function updateGame(dt) {
+            dinosaur.update(dt);
+            
+            obstacles = obstacles.filter(obstacle => {
+                obstacle.update(dt);
+
+                if (obstacle.x + obstacle.width < 0) {
+                    score += 2 * (consecutiveJumps + 1);
+                    consecutiveJumps++;
+                    jumpSound.play().catch(e => console.error("音效播放失敗:", e));
+                    return false;
+                }
+
+                if (checkCollision(dinosaur, obstacle)) {
+                    lives--;
+                    consecutiveJumps = 0;
+                    failSound.play().catch(e => console.error("音效播放失敗:", e));
+
+                    if (lives <= 0) {
+                        gameOver();
+                    }
+                    return false;
+                }
+
+                if (dinosaur.x > obstacle.x + obstacle.width) {
+                    score += 2 * (consecutiveJumps + 1);
+                    consecutiveJumps++;
+                    jumpSound.play().catch(e => console.error("音效播放失敗:", e));
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+                    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                    setTimeout(() => {
+                        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+                    }, 100);
+                    return false;
+                }
+
+                return true;
+            });
+
+            backgroundX -= gameSpeed * (dt / 1000) * canvasWidth * 0.05;
+            if (backgroundX <= -canvasWidth) {
+                backgroundX = 0;
+            }
+
+            if (score > 30) {
+                gameSpeed = INITIAL_GAME_SPEED + (score - 30) * 0.02;
+            } else {
+                gameSpeed += 0.0002 * (dt / 1000) * 60;
+            }
+        }
+
+        function drawGame() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            drawBackground();
+            dinosaur.draw();
+            obstacles.forEach(obstacle => obstacle.draw());
+            
+            ctx.fillStyle = 'black';
+            ctx.font = `${canvasHeight * 0.05}px Arial`;
+            ctx.fillText(`得分: ${score}`, 10, canvasHeight * 0.08);
+            ctx.fillText(`生命: ${lives}`, 10, canvasHeight * 0.16);
+            ctx.fillText(`最高分: ${highScore}`, canvasWidth - canvasWidth * 0.3, canvasHeight * 0.08);
+        }
+
+        function checkCollision(dino, obstacle) {
+            const collisionTolerance = canvasWidth * 0.02;
+            return dino.x < obstacle.x + obstacle.width - collisionTolerance &&
+                   dino.x + dino.width > obstacle.x + collisionTolerance &&
+                   dino.y + dino.height > obstacle.y + collisionTolerance &&
+                   dino.y < obstacle.y + obstacle.height - collisionTolerance &&
+                   !dino.hovering;
+        }
+
+        function gameOver() {
+            cancelAnimationFrame(animationFrameId);
+            backgroundMusic.pause();
+            backgroundMusic.currentTime = 0;
+
+            if (score > highScore) {
+                highScore = score;
+                try {
+                    localStorage.setItem('highScore', highScore);
+                } catch (e) {
+                    console.error("無法儲存最高分:", e);
+                }
+            }
+
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('highScore').textContent = highScore;
+            gameOverScreen.style.display = 'block';
+        }
+
+        function restartGame() {
+            gameOverScreen.style.display = 'none';
+            startGame();
+        }
+
+        function quitGame() {
+            gameOverScreen.style.display = 'none';
+            startScreen.style.display = 'block';
+        }
+
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const touchX = touch.clientX;
+            if (touchX < window.innerWidth / 2) {
+                if (!dinosaur.jumping || dinosaur.canDoubleJump) {
+                    dinosaur.jump();
+                } else if (dinosaur.jumping && !dinosaur.hovering) {
+                    dinosaur.hover();
+                }
+            } else {
+                dinosaur.groundPound();
+            }
+        }
+
+        function resizeCanvas() {
+            const aspectRatio = 16 / 9;
+            if (window.innerWidth / window.innerHeight > aspectRatio) {
+                canvasHeight = window.innerHeight;
+                canvasWidth = canvasHeight * aspectRatio;
+            } else {
+                canvasWidth = window.innerWidth;
+                canvasHeight = canvasWidth / aspectRatio;
+            }
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            
+            if (dinosaur) {
+                dinosaur.width = canvasWidth * 0.1

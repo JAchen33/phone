@@ -44,6 +44,10 @@
             cursor: pointer;
             border-radius: 5px;
         }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -53,7 +57,7 @@
         <p>點擊螢幕左側跳躍</p>
         <p>連續點擊兩下可以滯留空中閃避一秒</p>
         <p>點擊螢幕右側可以快速下降</p>
-        <button id="startButton">開始遊戲</button>
+        <button id="startButton" disabled>開始遊戲</button>
     </div>
     <div id="gameOverScreen" style="display: none;">
         <h1>遊戲結束</h1>
@@ -235,6 +239,10 @@
         }
 
         function startGame() {
+            if (!dinoImage.complete || !plantImage.complete || !backgroundImage.complete) {
+                alert("圖片資源尚未加載完成,請稍後再試。");
+                return;
+            }
             startScreen.style.display = 'none';
             initGame();
             animationFrameId = requestAnimationFrame(gameLoop);
@@ -399,14 +407,17 @@
             }
         }
 
-        canvas.addEventListener('touchstart', handleTouch);
-
-        startButton.addEventListener('click', startGame);
-        restartButton.addEventListener('click', restartGame);
-        quitButton.addEventListener('click', quitGame);
-
         function resizeCanvas() {
             const aspectRatio = 16 / 9;
             if (window.innerWidth / window.innerHeight > aspectRatio) {
                 canvasHeight = window.innerHeight;
-                canvasWidth = canvasHeight * aspect
+                canvasWidth = canvasHeight * aspectRatio;
+            } else {
+                canvasWidth = window.innerWidth;
+                canvasHeight = canvasWidth / aspectRatio;
+            }
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            
+            if (dinosaur) {
+                dinosaur.width = canvasWidth * 0.1

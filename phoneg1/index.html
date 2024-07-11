@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>恐龍跳躍遊戲</title>
+<style>
+  body { margin: 0; overflow: hidden; }
+  canvas { background: url('background.jpg') repeat-x; display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// 遊戲設定
+const assets = {
+  dinosaur: 'dinosaur.png',
+  plant: 'plant.png',
+  backgroundMusic: 'background_music.mp3',
+  jumpSound: 'jump_sound.wav',
+  failSound: 'fail_sound.wav'
+};
+const gameSettings = {
+  gravity: 0.5,
+  jumpPower: 10,
+  plantSpeed: 5,
+  plantInterval: 2000
+};
+
+// 初始化變量
+let canvas, ctx;
+let dinosaur, plants = [];
+let score = 0, isJumping = false, isGameOver = false;
+
+// 加載資源
+function loadAssets() {
+  // 背景音樂
+  let backgroundMusic = new Audio(assets.backgroundMusic);
+  backgroundMusic.loop = true;
+  backgroundMusic.play();
+
+  // 恐龍圖片
+  dinosaur = new Image();
+  dinosaur.src = assets.dinosaur;
+
+  // 障礙物圖片
+  plants.push(new Image());
+  plants[0].src = assets.plant;
+}
+
+// 遊戲初始化
+function init() {
+  canvas = document.getElementById('gameCanvas');
+  ctx = canvas.getContext('2d');
+  resizeGame();
+  loadAssets();
+  document.addEventListener('touchstart', handleTouchStart, false);
+  document.addEventListener('touchend', handleTouchEnd, false);
+  window.addEventListener('resize', resizeGame, false);
+  setInterval(spawnPlant, gameSettings.plantInterval);
+  gameLoop();
+}
+
+// 調整遊戲大小
+function resizeGame() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+
+// 觸摸事件處理
+function handleTouchStart(e) {
+  let touchX = e.touches[0].clientX;
+  if (touchX < canvas.width / 2 && !isJumping) {
+    isJumping = true;
+    dinosaur.velocityY = -gameSettings.jumpPower;
+    new Audio(assets.jumpSound).play();
+  }
+}
+
+function handleTouchEnd(e) {
+  let touchX = e.changedTouches[0].clientX;
+  if (touchX > canvas.width / 2) {
+    isJumping = false;
+  }
+}
+
+// 生成障礙物
+function spawnPlant() {
+  let plant = new Image();
+  plant.src = assets.plant;
+  plant.x = canvas.width;
+  plant.y = canvas.height - plant.height;
+  plants.push(plant);
+}
+
+// 遊戲主循環
+function gameLoop() {
+  if (!isGameOver) {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+// 更新遊戲狀態
+function update() {
+  // 更新恐龍
+  if (isJumping) {
+    dinosaur.y += dinosaur.velocityY;
+    dinosaur.velocityY += gameSettings.gravity;
+    if (dinosaur.y > canvas.height - dinosaur.height) {
+      isJumping = false;
+      dinosaur.y = canvas.height - dinosaur.height;
+      dinosaur.velocityY = 0;
+    }
+  }
+
+  // 更新障礙物
+  for (let i = 0; i < plants.length; i++) {
+    plants[i].x -= gameSettings.plantSpeed;
+    if (plants[i].x + plants[i].width < 0) {
+      plants.splice(i, 1);
+    }
+  }
+
+  // 檢查碰撞
+  for (let plant of plants) {
+    if (dinosaur.x < plant.x + plant.width &&
+        dinosaur.x + dinosaur.width > plant.x &&
+        dinosaur.y < plant.y + plant.height &&
+        dinosaur.y + dinosaur.height > plant.y) {
+      gameOver();
+    }
+  }
+}
+
+// 繪製遊戲畫面
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(dinosaur, 10, canvas.height - dinosaur.height);
+  for (let plant of plants) {
+    ctx.drawImage(plant, plant.x, plant.y);
+  }
+}
+
+// 遊戲結束
+function gameOver() {
+  isGameOver = true;
+  new Audio(assets.failSound).play();
+  alert('遊戲結束！您的得分是：' + score);
+}
+
+// 啟動遊戲
+init();
+</script>
+</body>
+</html>
+
